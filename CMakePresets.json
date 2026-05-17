@@ -1,0 +1,58 @@
+{
+  "version": 4,
+  "cmakeMinimumRequired": { "major": 3, "minor": 23, "patch": 0 },
+
+  "configurePresets": [
+    {
+      "name": "windows-msvc",
+      "displayName": "Windows MSVC (Win32 driver)",
+      "description": "Visual Studio 2022 / MSVC — Win32 API, SW render",
+      "generator": "Visual Studio 17 2022",
+      "architecture": { "value": "x64", "strategy": "set" },
+      "binaryDir": "${sourceDir}/build/windows-msvc",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "LV_CONF_PATH": "${sourceDir}/src/lv_conf.h"
+      },
+      "environment": {}
+    },
+    {
+      "name": "windows-msvc-release",
+      "displayName": "Windows MSVC Release",
+      "inherits": "windows-msvc",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "t507-arm64",
+      "displayName": "Allwinner T507 — aarch64 (Timesys Linux, SDL2)",
+      "description": "Cross-compile for Timesys Linux on T507. Source Timesys SDK env first.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/t507-arm64",
+      "toolchainFile": "${sourceDir}/cmake/toolchain-t507.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "LV_CONF_PATH": "${sourceDir}/src/lv_conf.h"
+      }
+    },
+    {
+      "name": "linux-host",
+      "displayName": "Linux Host (dev machine, SDL2)",
+      "description": "Native Linux build for rapid iteration on a desktop/laptop.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/linux-host",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "LV_CONF_PATH": "${sourceDir}/src/lv_conf.h"
+      }
+    }
+  ],
+
+  "buildPresets": [
+    { "name": "windows-msvc",         "configurePreset": "windows-msvc" },
+    { "name": "windows-msvc-release", "configurePreset": "windows-msvc-release" },
+    { "name": "t507-arm64",           "configurePreset": "t507-arm64" },
+    { "name": "linux-host",           "configurePreset": "linux-host" }
+  ]
+}

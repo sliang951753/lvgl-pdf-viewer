@@ -1,0 +1,116 @@
+# lvgl-pdf-viewer
+
+A cross-platform PDF viewer built with **LVGL 9.5** and **MuPDF**, targeting:
+
+| Platform | Display driver | Compiler |
+|---|---|---|
+| Windows | Win32 API (built-in LVGL driver) | MSVC (VS 2022) |
+| Allwinner T507 / Timesys Linux | SDL2 | aarch64-linux-gnu-gcc |
+| Linux desktop (dev) | SDL2 | GCC / Clang |
+
+Render pipeline: `MuPDF → ARGB8888 pixmap → lv_image_dsc_t → LVGL SW renderer`
+
+## Features (M1–M3)
+
+- [x] Open and display local PDF files  
+- [x] Fit-to-width page rendering  
+- [x] Page navigation (buttons + left/right swipe gesture)  
+- [x] Zoom in/out (25% steps, 50%–400%)  
+- [x] LRU page cache (5 pages in RAM, ~40 MB peak for 1080p)  
+- [x] Automatic prefetch of adjacent pages  
+- [ ] Text search *(planned v2)*  
+- [ ] Bookmarks / table of contents *(planned v2)*  
+- [ ] Annotation *(planned v3)*  
+
+## Prerequisites
+
+### Windows
+- Visual Studio 2022 (Desktop C++ workload)
+- CMake ≥ 3.23 ([cmake.org](https://cmake.org/download/))
+- Git for Windows
+
+### Linux / T507
+```bash
+# Ubuntu / Debian dev machine
+sudo apt install cmake ninja-build libsdl2-dev \
+     gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+
+# Or source your Timesys SDK environment-setup script
+source /opt/timesys/<board>/environment-setup-*
+```
+
+## Build
+
+### 1. Clone with submodules
+```bash
+git clone --recurse-submodules https://github.com/sliang951753/lvgl-pdf-viewer.git
+cd lvgl-pdf-viewer
+```
+
+### 2. Windows (MSVC)
+```powershell
+cmake --preset windows-msvc
+cmake --build --preset windows-msvc
+# Binary: build\windows-msvc\Debug\lvgl_pdf_viewer.exe
+```
+
+### 3. Linux desktop (quick dev iteration)
+```bash
+cmake --preset linux-host
+cmake --build --preset linux-host
+./build/linux-host/lvgl_pdf_viewer path/to/document.pdf
+```
+
+### 4. T507 cross-compile
+```bash
+# Source Timesys SDK first:
+source /opt/timesys/t507/environment-setup-aarch64-timesys-linux
+
+cmake --preset t507-arm64
+cmake --build --preset t507-arm64
+# Transfer binary to board and run:
+scp build/t507-arm64/lvgl_pdf_viewer root@<board-ip>:/usr/bin/
+ssh root@<board-ip> lvgl_pdf_viewer /home/root/document.pdf 1024 600
+```
+
+## Usage
+```
+lvgl_pdf_viewer <path.pdf> [width] [height]
+
+  path.pdf   — path to the PDF file to open
+  width      — display width  in pixels (default: 800)
+  height     — display height in pixels (default: 480)
+```
+
+## Project structure
+```
+lvgl-pdf-viewer/
+├── CMakeLists.txt          Top-level build
+├── CMakePresets.json       windows-msvc / t507-arm64 / linux-host
+├── cmake/
+│   ├── BuildMuPDF.cmake    MuPDF build via ExternalProject
+│   ├── FindMuPDF.cmake     MuPDF library finder
+│   └── toolchain-t507.cmake  aarch64 cross-compile toolchain
+├── src/
+│   ├── lv_conf.h           LVGL configuration
+│   ├── main.c              Entry point (WinMain / main)
+│   ├── pdf/
+│   │   ├── pdf_view.h/c    MuPDF rendering + LRU cache
+│   ├── ui/
+│   │   ├── ui_main.h/c     LVGL screen, nav bar, gesture handling
+│   └── platform/
+│       ├── platform.h      Cross-platform HAL interface
+│       ├── platform_win32.c  LVGL Win32 driver init
+│       └── platform_sdl2.c   LVGL SDL2 driver init
+├── third_party/
+│   ├── lvgl/               git submodule — LVGL v9.5
+│   └── mupdf/              git submodule — MuPDF 1.24.x
+└── assets/
+    └── sample.pdf
+```
+
+## License
+
+- Application code: **MIT**  
+- LVGL: [MIT](https://github.com/lvgl/lvgl/blob/master/LICENCE.txt)  
+- MuPDF: [AGPL-3.0](https://www.mupdf.com/licensing/) (free for open-source use; commercial licence available from Artifex)

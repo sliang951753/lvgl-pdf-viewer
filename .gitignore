@@ -1,0 +1,60 @@
+# Build directory output
+build/
+build-*/
+out/
+cmake-build-*/
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+install_manifest.txt
+Makefile
+*.cmake
+!cmake/*.cmake
+!CMakeLists.txt
+
+# MSVC / Visual Studio
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.VC.db
+*.VC.opendb
+*.pdb
+*.ilk
+*.exp
+*.lib
+!third_party/**/*.lib
+*.obj
+*.idb
+*.suo
+*.user
+.vs/
+
+# Executables and binaries
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+!third_party/**/*.a
+
+# IDE / editor
+.vscode/
+.idea/
+*.code-workspace
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# MuPDF build artifacts (built in-source by GNU make)
+third_party/mupdf/build/
+third_party/mupdf/generated/
+
+# Sample / test PDFs larger than a few KB (add your own)
+assets/*.pdf
+!assets/sample.pdf
