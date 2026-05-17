@@ -1,0 +1,7 @@
+[submodule "third_party/lvgl"]
+	path = third_party/lvgl
+	url = https://github.com/lvgl/lvgl.git
+	branch = release/v9.5
+[submodule "third_party/mupdf"]
+	path = third_party/mupdf
+	url = https://github.com/ArtifexSoftware/mupdf.git
