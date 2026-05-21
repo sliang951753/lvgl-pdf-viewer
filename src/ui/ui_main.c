@@ -52,6 +52,17 @@ static lv_obj_t *g_jump_input  = NULL;
 static lv_obj_t *g_jump_status = NULL;
 static lv_obj_t *g_jump_kb     = NULL;
 
+/* Search */
+static lv_obj_t *g_btn_search    = NULL;
+static lv_obj_t *g_search_modal  = NULL;
+static lv_obj_t *g_search_input  = NULL;
+static lv_obj_t *g_search_status = NULL;
+static lv_obj_t *g_search_kb     = NULL;
+
+static pdf_search_result_t *g_search_hits = NULL;  /* doc-wide cached */
+static int   g_search_cursor = -1;                 /* index into g_search_hits */
+static char  g_search_query[128] = {0};
+
 
 #define TOPBAR_H  48
 #define NAVBAR_H  56
@@ -73,6 +84,16 @@ static void close_page_jump_dialog(void);
 static void cb_jump_confirm(lv_event_t *e);
 static void cb_jump_cancel(lv_event_t *e);
 static void cb_page_label_clicked(lv_event_t *e);
+
+static void show_search_dialog(void);
+static void close_search_dialog(void);
+static void cb_search_run(lv_event_t *e);
+static void cb_search_prev(lv_event_t *e);
+static void cb_search_next(lv_event_t *e);
+static void cb_search_close(lv_event_t *e);
+static void cb_btn_search_clicked(lv_event_t *e);
+static void search_clear_results(void);
+static void search_jump_to_cursor(void);
 
 
 /* -------------------------------------------------------------------------- */
@@ -291,6 +312,17 @@ void ui_main_create(pdf_view_t *view, int disp_w, int disp_h)
     lv_obj_set_style_text_color(g_lbl_page, lv_color_hex(0xAAAAAA), 0);
     lv_obj_add_flag(g_lbl_page, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(g_lbl_page, cb_page_label_clicked, LV_EVENT_CLICKED, NULL);
+
+    /* Search button (right edge of topbar) */
+    g_btn_search = lv_button_create(g_topbar);
+    lv_obj_set_size(g_btn_search, 48, 36);
+    lv_obj_set_style_bg_color(g_btn_search, lv_color_hex(0x404040), 0);
+    lv_obj_set_style_radius(g_btn_search, 6, 0);
+    lv_obj_add_event_cb(g_btn_search, cb_btn_search_clicked, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *lbl_s = lv_label_create(g_btn_search);
+    lv_label_set_text(lbl_s, "Find");
+    lv_obj_set_style_text_color(lbl_s, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_center(lbl_s);
 
     /* ---- Scroll area (holds the page image) ---- */
     int scroll_h = disp_h - TOPBAR_H - NAVBAR_H;
@@ -547,4 +579,217 @@ static void cb_page_label_clicked(lv_event_t *e)
 {
     (void)e;
     show_page_jump_dialog();
+}
+
+/* -------------------------------------------------------------------------- */
+/* Text search dialog                                                          */
+/* -------------------------------------------------------------------------- */
+
+static void search_clear_results(void)
+{
+    if (g_search_hits) {
+        pdf_search_result_free(g_search_hits);
+        g_search_hits = NULL;
+    }
+    g_search_cursor = -1;
+}
+
+static void search_update_status(const char *override)
+{
+    if (!g_search_status) return;
+    if (override) { lv_label_set_text(g_search_status, override); return; }
+    if (!g_search_hits || g_search_hits->count == 0) {
+        lv_label_set_text(g_search_status, "No matches");
+        return;
+    }
+    char buf[96];
+    int cur = (g_search_cursor >= 0) ? (g_search_cursor + 1) : 0;
+    snprintf(buf, sizeof(buf), "%d / %d%s  (page %d)",
+             cur, g_search_hits->count,
+             g_search_hits->truncated ? "+" : "",
+             g_search_hits->hits[g_search_cursor < 0 ? 0 : g_search_cursor].page + 1);
+    lv_label_set_text(g_search_status, buf);
+}
+
+static void search_jump_to_cursor(void)
+{
+    if (!g_search_hits || g_search_cursor < 0 ||
+        g_search_cursor >= g_search_hits->count) return;
+    pdf_search_hit_t *h = &g_search_hits->hits[g_search_cursor];
+    /* Jump to the page containing the hit (1-based). */
+    ui_main_goto_page_number(h->page + 1);
+
+    /* Try to scroll the hit into view inside the rendered top image.
+     * Coordinates are PDF points; convert to pixel space using natural
+     * page size + rendered image height. */
+    float pw = 0, ph = 0;
+    if (g_view && pdf_view_page_size(g_view, h->page, &pw, &ph) && ph > 0) {
+        const lv_image_dsc_t *dsc =
+            pdf_view_render_page(g_view, h->page, g_disp_w, g_disp_h, g_zoom);
+        if (dsc) {
+            int rendered_h = (int)dsc->header.h;
+            int img_y_offset = 0;
+            /* If hit is on the second page of the window, account for top page height. */
+            if (h->page == g_cur_page + 1) {
+                int top_h = page_height_for_zoom(g_cur_page, g_zoom);
+                img_y_offset = top_h;
+            }
+            int hit_y_px = (int)((h->y / ph) * rendered_h) + img_y_offset;
+            int viewport_h = lv_obj_get_content_height(g_scroll_area);
+            int target = hit_y_px - viewport_h / 3;
+            if (target < 0) target = 0;
+            lv_obj_scroll_to_y(g_scroll_area, target, LV_ANIM_ON);
+        }
+    }
+    search_update_status(NULL);
+}
+
+static void cb_search_run(lv_event_t *e)
+{
+    (void)e;
+    if (!g_search_input || !g_view) return;
+    const char *txt = lv_textarea_get_text(g_search_input);
+    if (!txt || !*txt) {
+        search_update_status("Enter a query");
+        return;
+    }
+    /* Cap max hits to 1000 to keep memory bounded. */
+    search_clear_results();
+    strncpy(g_search_query, txt, sizeof(g_search_query) - 1);
+    g_search_query[sizeof(g_search_query) - 1] = '\0';
+    g_search_hits = pdf_view_search(g_view, txt, g_cur_page, true, 1000);
+    if (!g_search_hits) {
+        search_update_status(pdf_view_last_error());
+        return;
+    }
+    if (g_search_hits->count == 0) {
+        search_update_status("No matches");
+        return;
+    }
+    g_search_cursor = 0;
+    search_jump_to_cursor();
+}
+
+static void cb_search_next(lv_event_t *e)
+{
+    (void)e;
+    if (!g_search_hits || g_search_hits->count == 0) return;
+    g_search_cursor = (g_search_cursor + 1) % g_search_hits->count;
+    search_jump_to_cursor();
+}
+
+static void cb_search_prev(lv_event_t *e)
+{
+    (void)e;
+    if (!g_search_hits || g_search_hits->count == 0) return;
+    g_search_cursor = (g_search_cursor - 1 + g_search_hits->count)
+                      % g_search_hits->count;
+    search_jump_to_cursor();
+}
+
+static void close_search_dialog(void)
+{
+    if (g_search_kb) { lv_obj_del(g_search_kb); g_search_kb = NULL; }
+    if (g_search_modal) {
+        lv_obj_del(g_search_modal);
+        g_search_modal = NULL;
+        g_search_input = NULL;
+        g_search_status = NULL;
+    }
+}
+
+static void cb_search_close(lv_event_t *e)
+{
+    (void)e;
+    close_search_dialog();
+}
+
+static void cb_btn_search_clicked(lv_event_t *e)
+{
+    (void)e;
+    show_search_dialog();
+}
+
+static void show_search_dialog(void)
+{
+    if (g_search_modal) return;
+    if (!g_screen) return;
+
+    g_search_modal = lv_obj_create(g_screen);
+    lv_obj_remove_style_all(g_search_modal);
+    lv_obj_set_size(g_search_modal, g_disp_w, g_disp_h);
+    lv_obj_align(g_search_modal, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_set_style_bg_color(g_search_modal, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(g_search_modal, LV_OPA_60, 0);
+    lv_obj_clear_flag(g_search_modal, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *card = lv_obj_create(g_search_modal);
+    int card_w = (g_disp_w < 520) ? g_disp_w - 40 : 460;
+    lv_obj_set_size(card, card_w, LV_SIZE_CONTENT);
+    lv_obj_align(card, LV_ALIGN_CENTER, 0, -40);
+    lv_obj_set_style_bg_color(card, lv_color_hex(0x2D2D2D), 0);
+    lv_obj_set_style_border_width(card, 0, 0);
+    lv_obj_set_style_radius(card, 8, 0);
+    lv_obj_set_style_pad_all(card, 16, 0);
+    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(card,
+        LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    lv_obj_t *title = lv_label_create(card);
+    lv_label_set_text(title, "Find in document");
+    lv_obj_set_style_text_color(title, lv_color_hex(0xFFFFFF), 0);
+
+    g_search_input = lv_textarea_create(card);
+    lv_textarea_set_one_line(g_search_input, true);
+    lv_textarea_set_max_length(g_search_input, 120);
+    lv_textarea_set_placeholder_text(g_search_input, "search text");
+    if (g_search_query[0]) lv_textarea_set_text(g_search_input, g_search_query);
+    lv_obj_set_width(g_search_input, lv_pct(95));
+
+    g_search_status = lv_label_create(card);
+    lv_label_set_text(g_search_status,
+                      g_search_hits ? "" : "Type and tap Search");
+    lv_obj_set_style_text_color(g_search_status, lv_color_hex(0xFFCC66), 0);
+    if (g_search_hits) search_update_status(NULL);
+
+    /* Buttons row */
+    lv_obj_t *row = lv_obj_create(card);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, lv_pct(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row,
+        LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_top(row, 8, 0);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *btn_close = lv_button_create(row);
+    lv_obj_set_size(btn_close, LV_SIZE_CONTENT, 40);
+    lv_obj_add_event_cb(btn_close, cb_search_close, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *lc = lv_label_create(btn_close);
+    lv_label_set_text(lc, "Close"); lv_obj_center(lc);
+
+    lv_obj_t *btn_prev = lv_button_create(row);
+    lv_obj_set_size(btn_prev, LV_SIZE_CONTENT, 40);
+    lv_obj_add_event_cb(btn_prev, cb_search_prev, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *lp = lv_label_create(btn_prev);
+    lv_label_set_text(lp, LV_SYMBOL_UP " Prev"); lv_obj_center(lp);
+
+    lv_obj_t *btn_next = lv_button_create(row);
+    lv_obj_set_size(btn_next, LV_SIZE_CONTENT, 40);
+    lv_obj_add_event_cb(btn_next, cb_search_next, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *ln = lv_label_create(btn_next);
+    lv_label_set_text(ln, "Next " LV_SYMBOL_DOWN); lv_obj_center(ln);
+
+    lv_obj_t *btn_run = lv_button_create(row);
+    lv_obj_set_size(btn_run, LV_SIZE_CONTENT, 40);
+    lv_obj_add_event_cb(btn_run, cb_search_run, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *lr = lv_label_create(btn_run);
+    lv_label_set_text(lr, "Search"); lv_obj_center(lr);
+
+    /* Text keyboard */
+    g_search_kb = lv_keyboard_create(g_search_modal);
+    lv_keyboard_set_mode(g_search_kb, LV_KEYBOARD_MODE_TEXT_LOWER);
+    lv_keyboard_set_textarea(g_search_kb, g_search_input);
+    lv_obj_set_size(g_search_kb, g_disp_w, g_disp_h * 2 / 5);
+    lv_obj_align(g_search_kb, LV_ALIGN_BOTTOM_MID, 0, 0);
 }
