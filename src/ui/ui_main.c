@@ -17,6 +17,7 @@
 
 #include "ui_main.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* -------------------------------------------------------------------------- */
@@ -45,6 +46,13 @@ static lv_obj_t *g_lbl_zoom    = NULL;
 static lv_obj_t *g_btn_zoom_in = NULL;
 static lv_obj_t *g_btn_zoom_out= NULL;
 
+/* Page-jump dialog */
+static lv_obj_t *g_jump_modal  = NULL;
+static lv_obj_t *g_jump_input  = NULL;
+static lv_obj_t *g_jump_status = NULL;
+static lv_obj_t *g_jump_kb     = NULL;
+
+
 #define TOPBAR_H  48
 #define NAVBAR_H  56
 #define ZOOM_STEP 0.25f
@@ -60,6 +68,12 @@ static void render_two_page_window(int top_page_idx);
 static void update_nav_labels(void);
 static void cb_scroll(lv_event_t *e);
 static int page_height_for_zoom(int page_idx, float zoom);
+static void show_page_jump_dialog(void);
+static void close_page_jump_dialog(void);
+static void cb_jump_confirm(lv_event_t *e);
+static void cb_jump_cancel(lv_event_t *e);
+static void cb_page_label_clicked(lv_event_t *e);
+
 
 /* -------------------------------------------------------------------------- */
 /* Event callbacks                                                             */
@@ -275,6 +289,8 @@ void ui_main_create(pdf_view_t *view, int disp_w, int disp_h)
     g_lbl_page = lv_label_create(g_topbar);
     lv_label_set_text(g_lbl_page, "0 / 0");
     lv_obj_set_style_text_color(g_lbl_page, lv_color_hex(0xAAAAAA), 0);
+    lv_obj_add_flag(g_lbl_page, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(g_lbl_page, cb_page_label_clicked, LV_EVENT_CLICKED, NULL);
 
     /* ---- Scroll area (holds the page image) ---- */
     int scroll_h = disp_h - TOPBAR_H - NAVBAR_H;
@@ -398,4 +414,137 @@ void ui_main_zoom(float delta)
     g_zoom = new_zoom;
     pdf_view_cache_clear(g_view);   /* old zoom renders invalid */
     render_current_page();
+}
+
+/* -------------------------------------------------------------------------- */
+/* Page-jump dialog                                                            */
+/* -------------------------------------------------------------------------- */
+
+static void close_page_jump_dialog(void)
+{
+    if (g_jump_kb) {
+        lv_obj_del(g_jump_kb);
+        g_jump_kb = NULL;
+    }
+    if (g_jump_modal) {
+        lv_obj_del(g_jump_modal);
+        g_jump_modal = NULL;
+        g_jump_input = NULL;
+        g_jump_status = NULL;
+    }
+}
+
+static void cb_jump_cancel(lv_event_t *e)
+{
+    (void)e;
+    close_page_jump_dialog();
+}
+
+static void cb_jump_confirm(lv_event_t *e)
+{
+    (void)e;
+    if (!g_jump_input) return;
+    const char *txt = lv_textarea_get_text(g_jump_input);
+    if (!txt || !*txt) {
+        if (g_jump_status) lv_label_set_text(g_jump_status, "Please enter a page number");
+        return;
+    }
+    int n = atoi(txt);
+    int total = ui_main_total_pages();
+    if (n < 1 || n > total) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "Out of range (1..%d)", total);
+        if (g_jump_status) lv_label_set_text(g_jump_status, buf);
+        return;
+    }
+    if (ui_main_goto_page_number(n)) {
+        close_page_jump_dialog();
+    } else {
+        if (g_jump_status) lv_label_set_text(g_jump_status, "Jump failed");
+    }
+}
+
+static void show_page_jump_dialog(void)
+{
+    if (g_jump_modal) return;       /* already open */
+    if (!g_screen) return;
+
+    /* Modal backdrop */
+    g_jump_modal = lv_obj_create(g_screen);
+    lv_obj_remove_style_all(g_jump_modal);
+    lv_obj_set_size(g_jump_modal, g_disp_w, g_disp_h);
+    lv_obj_align(g_jump_modal, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_set_style_bg_color(g_jump_modal, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(g_jump_modal, LV_OPA_60, 0);
+    lv_obj_clear_flag(g_jump_modal, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* Card */
+    lv_obj_t *card = lv_obj_create(g_jump_modal);
+    int card_w = (g_disp_w < 480) ? g_disp_w - 40 : 360;
+    lv_obj_set_size(card, card_w, LV_SIZE_CONTENT);
+    lv_obj_align(card, LV_ALIGN_CENTER, 0, -40);
+    lv_obj_set_style_bg_color(card, lv_color_hex(0x2D2D2D), 0);
+    lv_obj_set_style_border_width(card, 0, 0);
+    lv_obj_set_style_radius(card, 8, 0);
+    lv_obj_set_style_pad_all(card, 16, 0);
+    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(card,
+        LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    /* Title */
+    lv_obj_t *title = lv_label_create(card);
+    char tbuf[64];
+    snprintf(tbuf, sizeof(tbuf), "Go to page (1..%d)", ui_main_total_pages());
+    lv_label_set_text(title, tbuf);
+    lv_obj_set_style_text_color(title, lv_color_hex(0xFFFFFF), 0);
+
+    /* Input */
+    g_jump_input = lv_textarea_create(card);
+    lv_textarea_set_one_line(g_jump_input, true);
+    lv_textarea_set_accepted_chars(g_jump_input, "0123456789");
+    lv_textarea_set_max_length(g_jump_input, 8);
+    lv_textarea_set_placeholder_text(g_jump_input, "page #");
+    lv_obj_set_width(g_jump_input, lv_pct(90));
+
+    /* Status */
+    g_jump_status = lv_label_create(card);
+    lv_label_set_text(g_jump_status, "");
+    lv_obj_set_style_text_color(g_jump_status, lv_color_hex(0xFF8080), 0);
+
+    /* Buttons row */
+    lv_obj_t *row = lv_obj_create(card);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, lv_pct(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row,
+        LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_top(row, 8, 0);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *btn_cancel = lv_button_create(row);
+    lv_obj_set_size(btn_cancel, LV_SIZE_CONTENT, 40);
+    lv_obj_add_event_cb(btn_cancel, cb_jump_cancel, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *lbl_c = lv_label_create(btn_cancel);
+    lv_label_set_text(lbl_c, "Cancel");
+    lv_obj_center(lbl_c);
+
+    lv_obj_t *btn_ok = lv_button_create(row);
+    lv_obj_set_size(btn_ok, LV_SIZE_CONTENT, 40);
+    lv_obj_add_event_cb(btn_ok, cb_jump_confirm, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *lbl_ok = lv_label_create(btn_ok);
+    lv_label_set_text(lbl_ok, "Go");
+    lv_obj_center(lbl_ok);
+
+    /* Number keyboard */
+    g_jump_kb = lv_keyboard_create(g_jump_modal);
+    lv_keyboard_set_mode(g_jump_kb, LV_KEYBOARD_MODE_NUMBER);
+    lv_keyboard_set_textarea(g_jump_kb, g_jump_input);
+    lv_obj_set_size(g_jump_kb, g_disp_w, g_disp_h / 3);
+    lv_obj_align(g_jump_kb, LV_ALIGN_BOTTOM_MID, 0, 0);
+}
+
+static void cb_page_label_clicked(lv_event_t *e)
+{
+    (void)e;
+    show_page_jump_dialog();
 }

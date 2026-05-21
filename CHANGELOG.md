@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.
   - `bool ui_main_goto_page_number(int page_no_1based)`
   - `int ui_main_current_page_number(void)`
   - `int ui_main_total_pages(void)`
+- **Page-jump UI**: top-bar page indicator is now clickable and opens a modal dialog with numeric input + on-screen number keyboard; validates range and reports out-of-range errors.
 
 ### Changed
 - UI/scroll behavior switched to **continuous document flow** (Word-like):
