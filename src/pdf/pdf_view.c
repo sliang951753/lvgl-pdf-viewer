@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <math.h>
 
 /* -------------------------------------------------------------------------- */
 /* Configuration                                                               */
@@ -155,6 +156,27 @@ int pdf_view_page_count(pdf_view_t *view)
     return view ? view->page_count : 0;
 }
 
+bool pdf_view_page_size(pdf_view_t *view, int page_idx,
+                        float *w_pts, float *h_pts)
+{
+    if (!view || page_idx < 0 || page_idx >= view->page_count)
+        return false;
+    fz_page *page = NULL;
+    bool ok = false;
+    fz_try(view->ctx) {
+        page = fz_load_page(view->ctx, view->doc, page_idx);
+        fz_rect bounds = fz_bound_page(view->ctx, page);
+        if (w_pts) *w_pts = bounds.x1 - bounds.x0;
+        if (h_pts) *h_pts = bounds.y1 - bounds.y0;
+        ok = true;
+    } fz_always(view->ctx) {
+        if (page) fz_drop_page(view->ctx, page);
+    } fz_catch(view->ctx) {
+        ok = false;
+    }
+    return ok;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Public API – render                                                         */
 /* -------------------------------------------------------------------------- */
@@ -286,4 +308,136 @@ void pdf_view_cache_clear(pdf_view_t *view)
 const char *pdf_view_last_error(void)
 {
     return g_last_error;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Text search                                                                 */
+/* -------------------------------------------------------------------------- */
+
+#define PDF_SEARCH_PAGE_HIT_MAX 64
+
+static int append_hits(pdf_search_result_t *res,
+                       int page,
+                       const fz_quad *quads, int n,
+                       int max_hits)
+{
+    for (int i = 0; i < n; i++) {
+        if (max_hits > 0 && res->count >= max_hits) {
+            res->truncated = 1;
+            return 1; /* signal stop */
+        }
+        if (res->count >= res->capacity) {
+            int new_cap = res->capacity ? res->capacity * 2 : 16;
+            pdf_search_hit_t *grown =
+                (pdf_search_hit_t *)realloc(res->hits,
+                                            (size_t)new_cap * sizeof(*grown));
+            if (!grown) {
+                set_error("search: out of memory");
+                res->truncated = 1;
+                return 1;
+            }
+            res->hits = grown;
+            res->capacity = new_cap;
+        }
+        const fz_quad q = quads[i];
+        /* Convert quad → axis-aligned bounding rect (PDF point space). */
+        float x0 = fminf(fminf(q.ul.x, q.ur.x), fminf(q.ll.x, q.lr.x));
+        float y0 = fminf(fminf(q.ul.y, q.ur.y), fminf(q.ll.y, q.lr.y));
+        float x1 = fmaxf(fmaxf(q.ul.x, q.ur.x), fmaxf(q.ll.x, q.lr.x));
+        float y1 = fmaxf(fmaxf(q.ul.y, q.ur.y), fmaxf(q.ll.y, q.lr.y));
+        pdf_search_hit_t *h = &res->hits[res->count++];
+        h->page = page;
+        h->x = x0;
+        h->y = y0;
+        h->w = x1 - x0;
+        h->h = y1 - y0;
+    }
+    return 0;
+}
+
+pdf_search_result_t *pdf_view_search(pdf_view_t *view,
+                                     const char *needle,
+                                     int         start_page,
+                                     bool        wrap_around,
+                                     int         max_hits)
+{
+    if (!view || !needle || !*needle) {
+        set_error("search: invalid arguments");
+        return NULL;
+    }
+    if (start_page < 0) start_page = 0;
+    if (start_page >= view->page_count) start_page = 0;
+
+    pdf_search_result_t *res =
+        (pdf_search_result_t *)calloc(1, sizeof(*res));
+    if (!res) {
+        set_error("search: alloc failed");
+        return NULL;
+    }
+
+    fz_quad quads[PDF_SEARCH_PAGE_HIT_MAX];
+    int total = view->page_count;
+    int scanned = 0;
+    int p = start_page;
+    int stop = 0;
+
+    while (scanned < total && !stop) {
+        int n = 0;
+        fz_try(view->ctx) {
+            n = fz_search_page_number(view->ctx, view->doc, p,
+                                      needle, NULL,
+                                      quads, PDF_SEARCH_PAGE_HIT_MAX);
+        } fz_catch(view->ctx) {
+            n = 0; /* skip page on error */
+        }
+        if (n > 0) {
+            if (append_hits(res, p, quads, n, max_hits))
+                stop = 1;
+        }
+        scanned++;
+        p++;
+        if (p >= total) {
+            if (!wrap_around) break;
+            p = 0;
+        }
+    }
+
+    return res;
+}
+
+void pdf_search_result_free(pdf_search_result_t *res)
+{
+    if (!res) return;
+    free(res->hits);
+    free(res);
+}
+
+pdf_search_result_t *pdf_view_search_page(pdf_view_t *view,
+                                          int         page_idx,
+                                          const char *needle,
+                                          int         max_hits)
+{
+    if (!view || !needle || !*needle ||
+        page_idx < 0 || page_idx >= view->page_count) {
+        set_error("search_page: invalid arguments");
+        return NULL;
+    }
+    pdf_search_result_t *res =
+        (pdf_search_result_t *)calloc(1, sizeof(*res));
+    if (!res) {
+        set_error("search_page: alloc failed");
+        return NULL;
+    }
+    fz_quad quads[PDF_SEARCH_PAGE_HIT_MAX];
+    int n = 0;
+    fz_try(view->ctx) {
+        n = fz_search_page_number(view->ctx, view->doc, page_idx,
+                                  needle, NULL,
+                                  quads, PDF_SEARCH_PAGE_HIT_MAX);
+    } fz_catch(view->ctx) {
+        n = 0;
+    }
+    if (n > 0)
+        append_hits(res, page_idx, quads, n, max_hits);
+    return res;
 }

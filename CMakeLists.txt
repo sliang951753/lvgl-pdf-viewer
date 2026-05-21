@@ -146,6 +146,26 @@ if(PLATFORM_LINUX)
 endif()
 
 # ----------------------------------------------------------------------
+# Test executables (Linux host only)
+# ----------------------------------------------------------------------
+if(PLATFORM_LINUX)
+    add_executable(test_search_cli
+        tests/test_search_cli.c
+        src/pdf/pdf_view.c
+    )
+    target_include_directories(test_search_cli PRIVATE
+        src
+        src/pdf
+        "${MUPDF_INCLUDE_DIR}"
+    )
+    target_link_libraries(test_search_cli PRIVATE
+        lvgl
+        ${MUPDF_LIBRARIES}
+        m pthread log
+    )
+endif()
+
+# ----------------------------------------------------------------------
 # Summary
 # ----------------------------------------------------------------------
 message(STATUS "")
