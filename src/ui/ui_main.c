@@ -897,6 +897,17 @@ static void cb_search_close(lv_event_t *e)
     close_search_dialog();
 }
 
+static void cb_search_clear(lv_event_t *e)
+{
+    (void)e;
+    search_clear_results();
+    if (g_search_input) lv_textarea_set_text(g_search_input, "");
+    g_search_query[0] = '\0';
+    if (g_search_status) {
+        lv_label_set_text(g_search_status, "Cleared");
+    }
+}
+
 static void cb_btn_search_clicked(lv_event_t *e)
 {
     (void)e;
@@ -978,6 +989,12 @@ static void show_search_dialog(void)
     lv_obj_add_event_cb(btn_run, cb_search_run, LV_EVENT_CLICKED, NULL);
     lv_obj_t *lr = lv_label_create(btn_run);
     lv_label_set_text(lr, "Search"); lv_obj_center(lr);
+
+    lv_obj_t *btn_clear = lv_button_create(row);
+    lv_obj_set_size(btn_clear, LV_SIZE_CONTENT, 40);
+    lv_obj_add_event_cb(btn_clear, cb_search_clear, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *lcl = lv_label_create(btn_clear);
+    lv_label_set_text(lcl, "Clear"); lv_obj_center(lcl);
 
     /* Text keyboard */
     g_search_kb = lv_keyboard_create(g_search_modal);
