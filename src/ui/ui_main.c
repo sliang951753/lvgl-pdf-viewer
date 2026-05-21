@@ -218,12 +218,14 @@ static void rebuild_page_offsets(void)
     }
 }
 
-static int32_t centered_x_for(lv_obj_t *img)
+static int32_t centered_x_for(int32_t img_w)
 {
     /* If the rendered page is narrower than the viewport, center it.
-     * Otherwise pin to x=0 so horizontal panning works naturally. */
-    int32_t img_w = lv_obj_get_width(img);
-    int32_t vp_w  = lv_obj_get_content_width(g_scroll_area);
+     * Otherwise pin to x=0 so horizontal panning works naturally.
+     * NB: must not use lv_obj_get_width() right after lv_obj_set_size()
+     * because LVGL 9 updates the coord cache only on the next layout
+     * pass; the caller passes the width it just set explicitly. */
+    int32_t vp_w = g_disp_w;  /* scroll_area has no padding, viewport == disp_w */
     if (img_w < vp_w) return (vp_w - img_w) / 2;
     return 0;
 }
@@ -236,12 +238,18 @@ static void position_window_images(void)
     if (g_cur_page < 0) g_cur_page = 0;
     if (g_cur_page >= n) g_cur_page = n - 1;
 
-    /* Place the top image at its absolute (X,Y) inside the scroll content. */
-    lv_obj_set_pos(g_img, centered_x_for(g_img), g_page_y[g_cur_page]);
+    /* Read width from the image descriptor (set just before this call in
+     * render_two_page_window) rather than lv_obj_get_width(), which may
+     * still report the previous zoom level's value pre-layout. */
+    const lv_image_dsc_t *d0 = (const lv_image_dsc_t *)lv_image_get_src(g_img);
+    int32_t w0 = d0 ? (int32_t)d0->header.w : g_disp_w;
+    lv_obj_set_pos(g_img, centered_x_for(w0), g_page_y[g_cur_page]);
 
     if (g_cur_page + 1 < n &&
         !lv_obj_has_flag(g_img_next, LV_OBJ_FLAG_HIDDEN)) {
-        lv_obj_set_pos(g_img_next, centered_x_for(g_img_next),
+        const lv_image_dsc_t *d1 = (const lv_image_dsc_t *)lv_image_get_src(g_img_next);
+        int32_t w1 = d1 ? (int32_t)d1->header.w : g_disp_w;
+        lv_obj_set_pos(g_img_next, centered_x_for(w1),
                        g_page_y[g_cur_page + 1]);
     }
 }
@@ -506,11 +514,15 @@ void ui_main_zoom(float delta)
     g_zoom = new_zoom;
     pdf_view_cache_clear(g_view);   /* old zoom renders invalid */
     rebuild_page_offsets();         /* heights changed */
-    /* Reset horizontal pan: page width changed, leftover scroll_x from
-     * a previous zoom level would push the new (possibly narrower) page
-     * off-center. cb_scroll re-centers via position_window_images. */
-    lv_obj_scroll_to_x(g_scroll_area, 0, LV_ANIM_OFF);
     render_current_page();
+    /* After new sizes are applied, force LVGL to recompute content
+     * extents, then snap horizontal scroll to 0 so the page is centered
+     * (or, when wider than viewport, flush-left ready for panning).
+     * Doing this before render leaves stale content_width and the snap
+     * gets clamped wrong, which can also leave zoomed-out pages off
+     * screen so the next zoom-out click looks like a no-op. */
+    lv_obj_update_layout(g_scroll_area);
+    lv_obj_scroll_to_x(g_scroll_area, 0, LV_ANIM_OFF);
 }
 
 /* -------------------------------------------------------------------------- */
