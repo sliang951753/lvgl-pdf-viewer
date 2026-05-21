@@ -7,6 +7,8 @@ All notable changes to this project will be documented in this file.
 ### Added
 - `docs/continuous-scroll-design.md`: continuous two-page window reflow design for Word-like page continuity.
 - `scripts/test_continuous_scroll_regression.sh`: regression smoke test for multi-page continuity baseline and one-page edge case.
+- `scripts/replay_continuous_scroll_regression.sh`: semi-automated replay test (wheel-scroll injection + log analysis).
+- `scripts/analyze_scroll_log.py`: parser/checker to detect stuck-on-page-1 regression in multi-page flows.
 
 ### Changed
 - UI/scroll behavior switched to **continuous document flow** (Word-like):

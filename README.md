@@ -91,6 +91,19 @@ What it checks:
 
 Design details: see `docs/continuous-scroll-design.md`.
 
+### 3.3 Continuous-scroll replay regression (semi-automated)
+```bash
+# optional but recommended: xdotool (for wheel replay)
+pkg install xdotool
+
+./scripts/replay_continuous_scroll_regression.sh
+```
+What it does:
+- launches viewer on multi-page PDF
+- replays repeated wheel-down events (if `xdotool` available)
+- analyzes log with `scripts/analyze_scroll_log.py`
+- fails if multi-page doc never goes beyond page 1
+
 ### 4. T507 cross-compile
 ```bash
 # Source Timesys SDK first:
