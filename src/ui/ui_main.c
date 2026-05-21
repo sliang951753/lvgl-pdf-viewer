@@ -316,16 +316,19 @@ static void update_nav_labels(void)
     snprintf(buf, sizeof(buf), "%.0f%%", g_zoom * 100.0f);
     lv_label_set_text(g_lbl_zoom, buf);
 
-    /* Enable/disable nav buttons */
-    lv_obj_set_state(g_btn_prev,
-        g_cur_page <= 0 ? LV_STATE_DISABLED : LV_STATE_DEFAULT, true);
-    lv_obj_set_state(g_btn_next,
-        g_cur_page >= pdf_view_page_count(g_view) - 1 ?
-            LV_STATE_DISABLED : LV_STATE_DEFAULT, true);
-    lv_obj_set_state(g_btn_zoom_in,
-        g_zoom >= ZOOM_MAX ? LV_STATE_DISABLED : LV_STATE_DEFAULT, true);
-    lv_obj_set_state(g_btn_zoom_out,
-        g_zoom <= ZOOM_MIN ? LV_STATE_DISABLED : LV_STATE_DEFAULT, true);
+    /* Enable/disable nav buttons.
+     * NOTE: lv_obj_set_state(obj, LV_STATE_DEFAULT, true) is a no-op in
+     * LVGL 9 — DEFAULT==0, and add_state(0) clears nothing. We must
+     * explicitly add or remove LV_STATE_DISABLED. */
+    if (g_cur_page <= 0)              lv_obj_add_state(g_btn_prev, LV_STATE_DISABLED);
+    else                              lv_obj_remove_state(g_btn_prev, LV_STATE_DISABLED);
+    if (g_cur_page >= pdf_view_page_count(g_view) - 1)
+                                      lv_obj_add_state(g_btn_next, LV_STATE_DISABLED);
+    else                              lv_obj_remove_state(g_btn_next, LV_STATE_DISABLED);
+    if (g_zoom >= ZOOM_MAX)           lv_obj_add_state(g_btn_zoom_in, LV_STATE_DISABLED);
+    else                              lv_obj_remove_state(g_btn_zoom_in, LV_STATE_DISABLED);
+    if (g_zoom <= ZOOM_MIN)           lv_obj_add_state(g_btn_zoom_out, LV_STATE_DISABLED);
+    else                              lv_obj_remove_state(g_btn_zoom_out, LV_STATE_DISABLED);
 }
 
 static lv_obj_t *make_nav_btn(lv_obj_t *parent, const char *label,
