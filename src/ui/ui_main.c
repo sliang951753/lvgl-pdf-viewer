@@ -657,7 +657,7 @@ static void cb_search_run(lv_event_t *e)
     search_clear_results();
     strncpy(g_search_query, txt, sizeof(g_search_query) - 1);
     g_search_query[sizeof(g_search_query) - 1] = '\0';
-    g_search_hits = pdf_view_search(g_view, txt, g_cur_page, true, 1000);
+    g_search_hits = pdf_view_search(g_view, txt, 0, false, 1000);
     if (!g_search_hits) {
         search_update_status(pdf_view_last_error());
         return;
