@@ -61,6 +61,23 @@ cmake --build --preset linux-host
 ./build/linux-host/lvgl_pdf_viewer path/to/document.pdf
 ```
 
+### 3.1 Termux + Termux:X11 local GUI simulation (Android)
+```bash
+# Install once
+pkg install x11-repo termux-x11-nightly
+
+# Launch Android-side Termux:X11 app
+am start -n com.termux.x11/com.termux.x11.MainActivity
+
+# Start X server bridge (in Termux)
+termux-x11 :0 &
+
+# Run viewer
+export DISPLAY=:0
+export XDG_RUNTIME_DIR=$PREFIX/tmp
+./scripts/run_gui_termux_x11.sh third_party/mupdf/thirdparty/zlib/zlib.3.pdf 1280 720
+```
+
 ### 4. T507 cross-compile
 ```bash
 # Source Timesys SDK first:
@@ -91,6 +108,10 @@ lvgl-pdf-viewer/
 │   ├── BuildMuPDF.cmake    MuPDF build via ExternalProject
 │   ├── FindMuPDF.cmake     MuPDF library finder
 │   └── toolchain-t507.cmake  aarch64 cross-compile toolchain
+├── docs/
+│   └── termux-x11-touch-debug.md   Touch/scroll fix design notes
+├── scripts/
+│   └── run_gui_termux_x11.sh       One-command local GUI run on Termux:X11
 ├── src/
 │   ├── lv_conf.h           LVGL configuration
 │   ├── main.c              Entry point (WinMain / main)

@@ -75,11 +75,16 @@ void platform_loop_once(void)
 
 bool platform_should_quit(void)
 {
+    /* IMPORTANT:
+     * Do NOT drain SDL's global event queue here with SDL_PollEvent().
+     * LVGL's SDL input driver (mouse/touch/keyboard) also consumes events
+     * from the same queue. If we drain it first, touch/click appears broken.
+     *
+     * Only peek SDL_QUIT without removing events, so LVGL still receives input.
+     */
     SDL_Event e;
-    while (SDL_PollEvent(&e)) {
-        if (e.type == SDL_QUIT) return true;
-    }
-    return false;
+    int n = SDL_PeepEvents(&e, 1, SDL_PEEKEVENT, SDL_QUIT, SDL_QUIT);
+    return n > 0;
 }
 
 lv_display_t *platform_get_display(void)

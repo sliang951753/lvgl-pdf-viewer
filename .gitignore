@@ -55,6 +55,9 @@ Thumbs.db
 third_party/mupdf/build/
 third_party/mupdf/generated/
 
+# Runtime logs and local helper scripts
+logs/
+
 # Sample / test PDFs larger than a few KB (add your own)
 assets/*.pdf
 !assets/sample.pdf

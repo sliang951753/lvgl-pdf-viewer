@@ -116,6 +116,12 @@ static void render_current_page(void)
     /* Update LVGL image */
     lv_image_set_src(g_img, dsc);
 
+    /* Explicitly size image object to rendered page size.
+     * This guarantees the parent scroll area sees the correct content extent,
+     * so vertical scrolling works reliably on SDL/Termux touch paths. */
+    lv_obj_set_size(g_img, (int32_t)dsc->header.w, (int32_t)dsc->header.h);
+    lv_obj_align(g_img, LV_ALIGN_TOP_MID, 0, 0);
+
     /* Reset scroll to top */
     lv_obj_scroll_to(g_scroll_area, 0, 0, LV_ANIM_OFF);
 
@@ -218,6 +224,12 @@ void ui_main_create(pdf_view_t *view, int disp_w, int disp_h)
     lv_obj_add_flag(g_scroll_area, LV_OBJ_FLAG_GESTURE_BUBBLE);
 
     g_img = lv_image_create(g_scroll_area);
+    /* Let parent scroll area handle drag immediately.
+     * On some touch backends, keeping image clickable can make scroll start only
+     * after long-press-like behavior. */
+    lv_obj_clear_flag(g_img, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(g_img, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_add_flag(g_img, LV_OBJ_FLAG_GESTURE_BUBBLE);
     lv_obj_align(g_img, LV_ALIGN_TOP_MID, 0, 0);
 
     /* ---- Bottom nav bar ---- */
