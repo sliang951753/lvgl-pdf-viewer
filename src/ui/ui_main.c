@@ -69,6 +69,14 @@ static pdf_search_result_t *g_search_hits = NULL;  /* doc-wide cached */
 static int   g_search_cursor = -1;                 /* index into g_search_hits */
 static char  g_search_query[128] = {0};
 
+/* Search hit overlay: red bbox rectangles drawn on top of the visible
+ * pages. Owned children of g_spacer so they share the virtual scroll
+ * coordinate system. Rebuilt on scroll / zoom / page change / search
+ * navigation. */
+static lv_obj_t **g_search_rects     = NULL;
+static int        g_search_rects_n   = 0;
+static int        g_search_rects_cap = 0;
+
 
 #define TOPBAR_H  48
 #define NAVBAR_H  56
@@ -102,6 +110,8 @@ static void cb_search_close(lv_event_t *e);
 static void cb_btn_search_clicked(lv_event_t *e);
 static void search_clear_results(void);
 static void search_jump_to_cursor(void);
+static void search_overlay_clear(void);
+static void search_overlay_refresh(void);
 
 
 /* -------------------------------------------------------------------------- */
@@ -252,6 +262,10 @@ static void position_window_images(void)
         lv_obj_set_pos(g_img_next, centered_x_for(w1),
                        g_page_y[g_cur_page + 1]);
     }
+
+    /* Overlay rectangles live in g_spacer coords too — refresh them
+     * whenever the visible-page window changes. */
+    search_overlay_refresh();
 }
 
 static void render_two_page_window(int top_page_idx)
@@ -526,6 +540,8 @@ void ui_main_zoom(float delta)
      * screen so the next zoom-out click looks like a no-op. */
     lv_obj_update_layout(g_scroll_area);
     lv_obj_scroll_to_x(g_scroll_area, 0, LV_ANIM_OFF);
+    /* Hit rectangles depend on the current zoom-scaled page geometry. */
+    search_overlay_refresh();
 }
 
 /* -------------------------------------------------------------------------- */
@@ -672,6 +688,104 @@ static void search_clear_results(void)
         g_search_hits = NULL;
     }
     g_search_cursor = -1;
+    search_overlay_clear();
+}
+
+/* -------------------------------------------------------------------- */
+/* Search hit overlay                                                    */
+/* -------------------------------------------------------------------- */
+
+static void search_overlay_clear(void)
+{
+    if (!g_search_rects) return;
+    for (int i = 0; i < g_search_rects_n; ++i) {
+        if (g_search_rects[i]) lv_obj_del(g_search_rects[i]);
+    }
+    g_search_rects_n = 0;
+}
+
+static lv_obj_t *overlay_alloc_rect(void)
+{
+    if (g_search_rects_n >= g_search_rects_cap) {
+        int new_cap = g_search_rects_cap ? g_search_rects_cap * 2 : 32;
+        lv_obj_t **r = (lv_obj_t **)realloc(g_search_rects,
+                                            sizeof(lv_obj_t *) * new_cap);
+        if (!r) return NULL;
+        g_search_rects = r;
+        g_search_rects_cap = new_cap;
+    }
+    lv_obj_t *rect = lv_obj_create(g_spacer);
+    lv_obj_remove_style_all(rect);
+    lv_obj_clear_flag(rect, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(rect, LV_OBJ_FLAG_SCROLLABLE);
+    /* Make sure overlays draw on top of g_img / g_img_next. */
+    lv_obj_move_foreground(rect);
+    g_search_rects[g_search_rects_n++] = rect;
+    return rect;
+}
+
+static void overlay_style_rect(lv_obj_t *rect, bool is_cursor)
+{
+    /* Non-cursor: thin red border, transparent fill.
+     * Cursor:     thick red border + translucent red fill. */
+    lv_obj_set_style_bg_opa(rect,
+        is_cursor ? LV_OPA_30 : LV_OPA_TRANSP, 0);
+    lv_obj_set_style_bg_color(rect, lv_color_hex(0xFF3030), 0);
+    lv_obj_set_style_border_color(rect, lv_color_hex(0xFF1010), 0);
+    lv_obj_set_style_border_opa(rect, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(rect, is_cursor ? 3 : 2, 0);
+    lv_obj_set_style_radius(rect, 0, 0);
+    lv_obj_set_style_pad_all(rect, 0, 0);
+}
+
+static void search_overlay_refresh(void)
+{
+    search_overlay_clear();
+    if (!g_search_hits || g_search_hits->count == 0) return;
+    if (!g_spacer || !g_img || !g_view || !g_page_y) return;
+
+    int n = pdf_view_page_count(g_view);
+    int p0 = g_cur_page;
+    int p1 = (g_cur_page + 1 < n &&
+              !lv_obj_has_flag(g_img_next, LV_OBJ_FLAG_HIDDEN))
+             ? g_cur_page + 1 : -1;
+
+    for (int i = 0; i < g_search_hits->count; ++i) {
+        pdf_search_hit_t *h = &g_search_hits->hits[i];
+        if (h->page != p0 && h->page != p1) continue;
+
+        /* Pick the image that holds this page so we can read its
+         * exact rendered pixel size from the descriptor (avoids the
+         * LVGL 9 layout-pass-lag pitfall on lv_obj_get_width). */
+        lv_obj_t *img = (h->page == p0) ? g_img : g_img_next;
+        const lv_image_dsc_t *d = (const lv_image_dsc_t *)lv_image_get_src(img);
+        if (!d) continue;
+        int32_t img_w = (int32_t)d->header.w;
+        int32_t img_h = (int32_t)d->header.h;
+
+        /* PDF point space → page pixels. */
+        float pw = 0, ph = 0;
+        if (!pdf_view_page_size(g_view, h->page, &pw, &ph) ||
+            pw <= 0 || ph <= 0) continue;
+        float sx = (float)img_w / pw;
+        float sy = (float)img_h / ph;
+
+        int32_t local_x = (int32_t)(h->x * sx);
+        int32_t local_y = (int32_t)(h->y * sy);
+        int32_t rect_w  = (int32_t)(h->w * sx);
+        int32_t rect_h  = (int32_t)(h->h * sy);
+        if (rect_w < 2) rect_w = 2;
+        if (rect_h < 2) rect_h = 2;
+
+        int32_t abs_x = centered_x_for(img_w) + local_x;
+        int32_t abs_y = g_page_y[h->page]     + local_y;
+
+        lv_obj_t *rect = overlay_alloc_rect();
+        if (!rect) break;
+        lv_obj_set_pos(rect, abs_x, abs_y);
+        lv_obj_set_size(rect, rect_w, rect_h);
+        overlay_style_rect(rect, i == g_search_cursor);
+    }
 }
 
 static void search_update_status(const char *override)
@@ -712,6 +826,9 @@ static void search_jump_to_cursor(void)
         if (target < 0) target = 0;
         lv_obj_scroll_to_y(g_scroll_area, target, LV_ANIM_ON);
     }
+    /* Cursor changed style → re-style overlay (cursor hit gets the
+     * filled red look). */
+    search_overlay_refresh();
     search_update_status(NULL);
 }
 
