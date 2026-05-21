@@ -357,6 +357,37 @@ void ui_main_goto_page(int page_idx)
     render_current_page();
 }
 
+bool ui_main_goto_page_number(int page_no_1based)
+{
+    if (!g_view) return false;
+
+    int page_count = pdf_view_page_count(g_view);
+    if (page_count <= 0) return false;
+    if (page_no_1based < 1 || page_no_1based > page_count) return false;
+
+    /* Continuous two-page window model uses top page index as anchor.
+     * For final page request, anchor to the last valid window top (page_count-2)
+     * so the requested last page appears as the second page in view. */
+    int target_idx0 = page_no_1based - 1;
+    if (page_count > 1 && target_idx0 >= page_count - 1) {
+        target_idx0 = page_count - 2;
+    }
+
+    ui_main_goto_page(target_idx0);
+    return true;
+}
+
+int ui_main_current_page_number(void)
+{
+    return g_cur_page + 1;
+}
+
+int ui_main_total_pages(void)
+{
+    if (!g_view) return 0;
+    return pdf_view_page_count(g_view);
+}
+
 void ui_main_zoom(float delta)
 {
     float new_zoom = g_zoom + delta;

@@ -9,6 +9,10 @@ All notable changes to this project will be documented in this file.
 - `scripts/test_continuous_scroll_regression.sh`: regression smoke test for multi-page continuity baseline and one-page edge case.
 - `scripts/replay_continuous_scroll_regression.sh`: semi-automated replay test (wheel-scroll injection + log analysis).
 - `scripts/analyze_scroll_log.py`: parser/checker to detect stuck-on-page-1 regression in multi-page flows.
+- **Page-jump API interface** in `ui_main` (no UI wiring yet):
+  - `bool ui_main_goto_page_number(int page_no_1based)`
+  - `int ui_main_current_page_number(void)`
+  - `int ui_main_total_pages(void)`
 
 ### Changed
 - UI/scroll behavior switched to **continuous document flow** (Word-like):
