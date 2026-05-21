@@ -130,6 +130,10 @@ lvgl-pdf-viewer/
     └── sample.pdf
 ```
 
+## Changelog
+
+See [CHANGELOG.md](./CHANGELOG.md) for release-by-release changes.
+
 ## License
 
 - Application code: **MIT**  
