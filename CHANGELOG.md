@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `docs/continuous-scroll-design.md`: continuous two-page window reflow design for Word-like page continuity.
+- `scripts/test_continuous_scroll_regression.sh`: regression smoke test for multi-page continuity baseline and one-page edge case.
+
 ### Changed
 - UI/scroll behavior switched to **continuous document flow** (Word-like):
   - Render a two-page window (`N` and `N+1`) in one scroll container.

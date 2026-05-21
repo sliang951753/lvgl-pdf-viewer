@@ -79,6 +79,18 @@ export XDG_RUNTIME_DIR=$PREFIX/tmp
 ./scripts/run_gui_termux_x11.sh third_party/mupdf/thirdparty/zlib/zlib.3.pdf 1280 720
 ```
 
+### 3.2 Continuous-scroll regression smoke test
+```bash
+# Requires Termux:X11 display endpoint running (DISPLAY=:0)
+./scripts/test_continuous_scroll_regression.sh
+```
+What it checks:
+- multi-page PDF opens and renders page 0 + adjacent page 1 (two-page window baseline)
+- no render-failed log line
+- one-page PDF does not incorrectly render page 1
+
+Design details: see `docs/continuous-scroll-design.md`.
+
 ### 4. T507 cross-compile
 ```bash
 # Source Timesys SDK first:
