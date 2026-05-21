@@ -714,7 +714,12 @@ static lv_obj_t *overlay_alloc_rect(void)
         g_search_rects = r;
         g_search_rects_cap = new_cap;
     }
-    lv_obj_t *rect = lv_obj_create(g_spacer);
+    /* Parent must be g_scroll_area, NOT g_spacer: g_spacer is just a
+     * 1x1 sentinel that drives content height. The actual page images
+     * (g_img, g_img_next) are direct children of g_scroll_area placed
+     * via lv_obj_set_pos at absolute Y, and our overlay rectangles use
+     * the same coordinate system. */
+    lv_obj_t *rect = lv_obj_create(g_scroll_area);
     lv_obj_remove_style_all(rect);
     lv_obj_clear_flag(rect, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(rect, LV_OBJ_FLAG_SCROLLABLE);
@@ -742,7 +747,7 @@ static void search_overlay_refresh(void)
 {
     search_overlay_clear();
     if (!g_search_hits || g_search_hits->count == 0) return;
-    if (!g_spacer || !g_img || !g_view || !g_page_y) return;
+    if (!g_scroll_area || !g_img || !g_view || !g_page_y) return;
 
     int n = pdf_view_page_count(g_view);
     int p0 = g_cur_page;
