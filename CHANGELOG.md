@@ -14,6 +14,8 @@ All notable changes to this project will be documented in this file.
 - `docs/virtual-scroll-design.md`: design notes for the virtual scroll model and zoom recentering.
 - Page-jump API/UI (`ui_main_goto_page_number`, `ui_main_current_page_number`, `ui_main_total_pages`) — clickable page indicator opens a modal numeric pad with range validation.
 - Continuous-scroll regression scripts (`test_continuous_scroll_regression.sh`, `replay_continuous_scroll_regression.sh`, `analyze_scroll_log.py`).
+- `scripts/test_search_regression.sh`: headless regression for `pdf_view_search()` via `tests/test_search_cli` (5 cases: positive, deeper start, negative no-match, truncation flag, second document).
+- **Search hit overlay**: red bounding-box rectangles drawn on visible pages; the active hit (cursor) gets a thicker border + translucent red fill.
 
 ### Changed
 - Replaced the previous 2-page reflow window with the virtual full-document model. Native LVGL vertical scroll now handles up/down, including scrolling back to earlier pages — the gesture callback for page flipping has been removed.

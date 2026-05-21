@@ -106,6 +106,20 @@ What it does:
 - analyzes log with `scripts/analyze_scroll_log.py`
 - fails if multi-page doc never goes beyond page 1
 
+### 3.4 Search regression (headless)
+```bash
+./scripts/test_search_regression.sh            # build + run
+./scripts/test_search_regression.sh --no-build # just run
+```
+Headless smoke for `pdf_view_search()` via `tests/test_search_cli.c`. Cases:
+- common word found from page 0 (with min-hits + first-page check)
+- same query from a deeper start page still returns hits
+- absent token returns zero hits (rc=1)
+- truncation flag set when `max_hits` < total matches
+- second document (`zlib.3.pdf`) to guard against doc-specific hardcoding
+
+No display server required — safe in CI / on a vanilla shell.
+
 ### 4. T507 cross-compile
 ```bash
 # Source Timesys SDK first:
