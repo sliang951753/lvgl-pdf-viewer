@@ -12,16 +12,18 @@ Render pipeline: `MuPDF → ARGB8888 pixmap → lv_image_dsc_t → LVGL SW rende
 
 ## Features (M1–M3)
 
-- [x] Open and display local PDF files  
-- [x] Fit-to-width page rendering  
-- [x] Continuous document scrolling (Word-like page-to-page continuity)  
-- [x] Button navigation (Prev/Next)  
-- [x] Zoom in/out (25% steps, 50%–400%)  
-- [x] LRU page cache (5 pages in RAM, ~40 MB peak for 1080p)  
-- [x] Automatic prefetch of adjacent pages  
-- [ ] Text search *(planned v2)*  
-- [ ] Bookmarks / table of contents *(planned v2)*  
-- [ ] Annotation *(planned v3)*  
+- [x] Open and display local PDF files
+- [x] Fit-to-width page rendering
+- [x] **Virtual full-document scroll** (continuous, native scrollbar reflects whole-doc position)
+- [x] Button navigation (Prev/Next) — disables correctly at document edges
+- [x] Page-jump dialog (clickable page indicator → numeric pad)
+- [x] Zoom in/out (25% steps, 50%–400%) — pages re-center and horizontal pan resets after zoom
+- [x] **Text search** (full-document or single-page) with hit navigation (Prev/Next/Close)
+- [x] LRU page cache (5 pages in RAM, ~40 MB peak for 1080p)
+- [x] Automatic prefetch of adjacent pages
+- [ ] Search hit overlay (red bbox highlight) *(planned)*
+- [ ] Bookmarks / table of contents *(planned v2)*
+- [ ] Annotation *(planned v3)*
 
 ## Prerequisites
 
