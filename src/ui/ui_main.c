@@ -218,6 +218,16 @@ static void rebuild_page_offsets(void)
     }
 }
 
+static int32_t centered_x_for(lv_obj_t *img)
+{
+    /* If the rendered page is narrower than the viewport, center it.
+     * Otherwise pin to x=0 so horizontal panning works naturally. */
+    int32_t img_w = lv_obj_get_width(img);
+    int32_t vp_w  = lv_obj_get_content_width(g_scroll_area);
+    if (img_w < vp_w) return (vp_w - img_w) / 2;
+    return 0;
+}
+
 static void position_window_images(void)
 {
     if (!g_page_y || !g_img) return;
@@ -226,11 +236,13 @@ static void position_window_images(void)
     if (g_cur_page < 0) g_cur_page = 0;
     if (g_cur_page >= n) g_cur_page = n - 1;
 
-    /* Place the top image at its absolute Y inside the scroll content. */
-    lv_obj_set_pos(g_img, 0, g_page_y[g_cur_page]);
+    /* Place the top image at its absolute (X,Y) inside the scroll content. */
+    lv_obj_set_pos(g_img, centered_x_for(g_img), g_page_y[g_cur_page]);
 
-    if (g_cur_page + 1 < n) {
-        lv_obj_set_pos(g_img_next, 0, g_page_y[g_cur_page + 1]);
+    if (g_cur_page + 1 < n &&
+        !lv_obj_has_flag(g_img_next, LV_OBJ_FLAG_HIDDEN)) {
+        lv_obj_set_pos(g_img_next, centered_x_for(g_img_next),
+                       g_page_y[g_cur_page + 1]);
     }
 }
 
@@ -494,6 +506,10 @@ void ui_main_zoom(float delta)
     g_zoom = new_zoom;
     pdf_view_cache_clear(g_view);   /* old zoom renders invalid */
     rebuild_page_offsets();         /* heights changed */
+    /* Reset horizontal pan: page width changed, leftover scroll_x from
+     * a previous zoom level would push the new (possibly narrower) page
+     * off-center. cb_scroll re-centers via position_window_images. */
+    lv_obj_scroll_to_x(g_scroll_area, 0, LV_ANIM_OFF);
     render_current_page();
 }
 
