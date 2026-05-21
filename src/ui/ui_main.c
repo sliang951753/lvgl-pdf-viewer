@@ -37,8 +37,14 @@ static lv_obj_t *g_topbar      = NULL;
 static lv_obj_t *g_lbl_title   = NULL;
 static lv_obj_t *g_lbl_page    = NULL;
 static lv_obj_t *g_scroll_area = NULL;
+static lv_obj_t *g_spacer      = NULL;      /* invisible, sized to full doc height */
 static lv_obj_t *g_img         = NULL;      /* current/top page in window */
 static lv_obj_t *g_img_next    = NULL;      /* next page in window */
+
+/* Virtual full-document scroll: pixel Y offset of each page (0..N).
+ * g_page_y[i] is top of page i; g_page_y[N] is total document height. */
+static int32_t *g_page_y       = NULL;
+static int32_t  g_doc_total_h  = 0;
 static lv_obj_t *g_navbar      = NULL;
 static lv_obj_t *g_btn_prev    = NULL;
 static lv_obj_t *g_btn_next    = NULL;
@@ -76,9 +82,11 @@ static char  g_search_query[128] = {0};
 
 static void render_current_page(void);
 static void render_two_page_window(int top_page_idx);
+static void rebuild_page_offsets(void);
+static void position_window_images(void);
 static void update_nav_labels(void);
 static void cb_scroll(lv_event_t *e);
-static int page_height_for_zoom(int page_idx, float zoom);
+static int  page_height_for_zoom(int page_idx, float zoom);
 static void show_page_jump_dialog(void);
 static void close_page_jump_dialog(void);
 static void cb_jump_confirm(lv_event_t *e);
@@ -103,24 +111,17 @@ static void search_jump_to_cursor(void);
 static void cb_btn_prev(lv_event_t *e)
 {
     (void)e;
-    if (g_cur_page > 0) {
-        g_cur_page--;
-        render_two_page_window(g_cur_page);
-        int prev_h = page_height_for_zoom(g_cur_page, g_zoom);
-        int32_t viewport_h = lv_obj_get_content_height(g_scroll_area);
-        int32_t target = prev_h - viewport_h;
-        if (target < 0) target = 0;
-        lv_obj_scroll_to_y(g_scroll_area, target, LV_ANIM_OFF);
+    if (g_cur_page > 0 && g_page_y) {
+        lv_obj_scroll_to_y(g_scroll_area, g_page_y[g_cur_page - 1], LV_ANIM_OFF);
     }
 }
 
 static void cb_btn_next(lv_event_t *e)
 {
     (void)e;
-    if (g_cur_page < pdf_view_page_count(g_view) - 2) {
-        g_cur_page++;
-        render_two_page_window(g_cur_page);
-        lv_obj_scroll_to_y(g_scroll_area, 0, LV_ANIM_OFF);
+    int page_count = pdf_view_page_count(g_view);
+    if (g_cur_page < page_count - 1 && g_page_y) {
+        lv_obj_scroll_to_y(g_scroll_area, g_page_y[g_cur_page + 1], LV_ANIM_OFF);
     }
 }
 
@@ -138,25 +139,32 @@ static void cb_btn_zoom_out(lv_event_t *e)
 
 static void cb_scroll(lv_event_t *e)
 {
-    if (g_zoom > 1.0f) return;
     if (g_window_reflow_guard) return;
+    if (!g_page_y) return;
 
     lv_obj_t *obj = lv_event_get_target_obj(e);
     int page_count = pdf_view_page_count(g_view);
-    if (page_count < 2) return;
+    if (page_count <= 0) return;
 
     int32_t y = lv_obj_get_scroll_y(obj);
-    int h0 = page_height_for_zoom(g_cur_page, g_zoom);
 
-    /* Word-like continuous reading flow:
-     * once the top page fully scrolls out, shift window from (N,N+1)
-     * to (N+1,N+2) and preserve residual offset. */
-    if (y >= h0 && g_cur_page < page_count - 2) {
+    /* Find which page the top of the viewport is currently on
+     * via binary search over g_page_y. */
+    int lo = 0, hi = page_count - 1;
+    while (lo < hi) {
+        int mid = (lo + hi + 1) / 2;
+        if (g_page_y[mid] <= y) lo = mid;
+        else hi = mid - 1;
+    }
+    int new_top = lo;
+
+    /* Reflow the 2-image window only when the top page changes.
+     * Coordinates of images are absolute Y inside the scroll content,
+     * so the scroll bar / scroll position remain correct automatically. */
+    if (new_top != g_cur_page) {
         g_window_reflow_guard = true;
-        int32_t residual = y - h0;
-        g_cur_page++;
+        g_cur_page = new_top;
         render_two_page_window(g_cur_page);
-        lv_obj_scroll_to_y(g_scroll_area, residual, LV_ANIM_OFF);
         g_window_reflow_guard = false;
     }
 }
@@ -166,60 +174,64 @@ static void cb_scroll_end(lv_event_t *e)
     (void)e;
 }
 
-static void cb_gesture(lv_event_t *e)
-{
-    if (g_zoom > 1.0f) return;
-    if (g_window_reflow_guard) return;
-    (void)e;
-
-    lv_indev_t *indev = lv_indev_active();
-    if (!indev) return;
-    lv_dir_t dir = lv_indev_get_gesture_dir(indev);
-
-    int page_count = pdf_view_page_count(g_view);
-    if (page_count < 2) return;
-    int32_t y = lv_obj_get_scroll_y(g_scroll_area);
-
-    /* Finger swipes DOWN (content moves down) at top of window = go back
-     * to previous window (N-1, N). Scroll-elastic is disabled so y can
-     * never be negative; we use gesture as the only "go back" trigger. */
-    if (dir == LV_DIR_BOTTOM && y <= 0 && g_cur_page > 0) {
-        g_window_reflow_guard = true;
-        g_cur_page--;
-        render_two_page_window(g_cur_page);
-        /* Land at the bottom of the new top page so the page the user
-         * was on (now the bottom slot) stays visually anchored. */
-        int new_top_h = page_height_for_zoom(g_cur_page, g_zoom);
-        int viewport_h = lv_obj_get_content_height(g_scroll_area);
-        int32_t target = new_top_h - viewport_h;
-        if (target < 0) target = 0;
-        lv_obj_scroll_to_y(g_scroll_area, target, LV_ANIM_OFF);
-        g_window_reflow_guard = false;
-    }
-    /* Finger swipes UP (content moves up) past bottom of last window =
-     * advance window. Normally cb_scroll handles this via residual scroll,
-     * but on the very last available window it can stick — fall through. */
-    else if (dir == LV_DIR_TOP && g_cur_page < page_count - 2) {
-        int h0 = page_height_for_zoom(g_cur_page, g_zoom);
-        if (y >= h0 - 1) {
-            g_window_reflow_guard = true;
-            g_cur_page++;
-            render_two_page_window(g_cur_page);
-            lv_obj_scroll_to_y(g_scroll_area, 0, LV_ANIM_OFF);
-            g_window_reflow_guard = false;
-        }
-    }
-}
-
 /* -------------------------------------------------------------------------- */
 /* Internal helpers                                                            */
 /* -------------------------------------------------------------------------- */
 
 static int page_height_for_zoom(int page_idx, float zoom)
 {
-    const lv_image_dsc_t *dsc = pdf_view_render_page(g_view, page_idx, g_disp_w, g_disp_h, zoom);
-    if (!dsc) return g_disp_h;
-    return (int)dsc->header.h;
+    /* Predict pixel height from PDF point size + scale, no full render. */
+    if (!g_view) return g_disp_h;
+    float pw_pt = 0, ph_pt = 0;
+    if (!pdf_view_page_size(g_view, page_idx, &pw_pt, &ph_pt) || pw_pt <= 0) {
+        return g_disp_h;
+    }
+    float scale = ((float)g_disp_w / pw_pt) * zoom;
+    int h = (int)(ph_pt * scale + 0.5f);
+    return h > 0 ? h : g_disp_h;
+}
+
+static void rebuild_page_offsets(void)
+{
+    if (!g_view) return;
+    int n = pdf_view_page_count(g_view);
+    if (n <= 0) return;
+
+    free(g_page_y);
+    g_page_y = (int32_t *)malloc(sizeof(int32_t) * (n + 1));
+    if (!g_page_y) { g_doc_total_h = 0; return; }
+
+    int32_t y = 0;
+    for (int i = 0; i < n; ++i) {
+        g_page_y[i] = y;
+        y += page_height_for_zoom(i, g_zoom);
+    }
+    g_page_y[n] = y;
+    g_doc_total_h = y;
+
+    /* Resize the spacer to drive the scroll area's content height to
+     * the full document height — this is what makes the scrollbar
+     * reflect the global position. */
+    if (g_spacer) {
+        lv_obj_set_size(g_spacer, 1, g_doc_total_h);
+        lv_obj_set_pos(g_spacer, 0, 0);
+    }
+}
+
+static void position_window_images(void)
+{
+    if (!g_page_y || !g_img) return;
+    int n = pdf_view_page_count(g_view);
+    if (n <= 0) return;
+    if (g_cur_page < 0) g_cur_page = 0;
+    if (g_cur_page >= n) g_cur_page = n - 1;
+
+    /* Place the top image at its absolute Y inside the scroll content. */
+    lv_obj_set_pos(g_img, 0, g_page_y[g_cur_page]);
+
+    if (g_cur_page + 1 < n) {
+        lv_obj_set_pos(g_img_next, 0, g_page_y[g_cur_page + 1]);
+    }
 }
 
 static void render_two_page_window(int top_page_idx)
@@ -229,8 +241,7 @@ static void render_two_page_window(int top_page_idx)
     int page_count = pdf_view_page_count(g_view);
     if (page_count <= 0) return;
     if (top_page_idx < 0) top_page_idx = 0;
-    if (page_count == 1) top_page_idx = 0;
-    else if (top_page_idx >= page_count - 1) top_page_idx = page_count - 2;
+    if (top_page_idx >= page_count) top_page_idx = page_count - 1;
 
     g_cur_page = top_page_idx;
 
@@ -241,7 +252,6 @@ static void render_two_page_window(int top_page_idx)
     }
     lv_image_set_src(g_img, d0);
     lv_obj_set_size(g_img, (int32_t)d0->header.w, (int32_t)d0->header.h);
-    lv_obj_align(g_img, LV_ALIGN_TOP_MID, 0, 0);
 
     if (g_cur_page + 1 < page_count) {
         const lv_image_dsc_t *d1 = pdf_view_render_page(g_view, g_cur_page + 1, g_disp_w, g_disp_h, g_zoom);
@@ -249,7 +259,6 @@ static void render_two_page_window(int top_page_idx)
             lv_obj_clear_flag(g_img_next, LV_OBJ_FLAG_HIDDEN);
             lv_image_set_src(g_img_next, d1);
             lv_obj_set_size(g_img_next, (int32_t)d1->header.w, (int32_t)d1->header.h);
-            lv_obj_align_to(g_img_next, g_img, LV_ALIGN_OUT_BOTTOM_MID, 0, 0);
         } else {
             lv_obj_add_flag(g_img_next, LV_OBJ_FLAG_HIDDEN);
         }
@@ -257,6 +266,7 @@ static void render_two_page_window(int top_page_idx)
         lv_obj_add_flag(g_img_next, LV_OBJ_FLAG_HIDDEN);
     }
 
+    position_window_images();
     update_nav_labels();
 
     pdf_view_prefetch(g_view, g_cur_page, g_disp_w, g_disp_h, g_zoom);
@@ -268,7 +278,9 @@ static void render_two_page_window(int top_page_idx)
 static void render_current_page(void)
 {
     render_two_page_window(g_cur_page);
-    lv_obj_scroll_to(g_scroll_area, 0, 0, LV_ANIM_OFF);
+    if (g_page_y) {
+        lv_obj_scroll_to_y(g_scroll_area, g_page_y[g_cur_page], LV_ANIM_OFF);
+    }
 }
 
 static void update_nav_labels(void)
@@ -288,7 +300,7 @@ static void update_nav_labels(void)
     lv_obj_set_state(g_btn_prev,
         g_cur_page <= 0 ? LV_STATE_DISABLED : LV_STATE_DEFAULT, true);
     lv_obj_set_state(g_btn_next,
-        g_cur_page >= pdf_view_page_count(g_view) - 2 ?
+        g_cur_page >= pdf_view_page_count(g_view) - 1 ?
             LV_STATE_DISABLED : LV_STATE_DEFAULT, true);
     lv_obj_set_state(g_btn_zoom_in,
         g_zoom >= ZOOM_MAX ? LV_STATE_DISABLED : LV_STATE_DEFAULT, true);
@@ -377,10 +389,20 @@ void ui_main_create(pdf_view_t *view, int disp_w, int disp_h)
     lv_obj_clear_flag(g_scroll_area, LV_OBJ_FLAG_SCROLL_ELASTIC);
     lv_obj_clear_flag(g_scroll_area, LV_OBJ_FLAG_SCROLL_MOMENTUM);
     lv_obj_set_scrollbar_mode(g_scroll_area, LV_SCROLLBAR_MODE_AUTO);
-    lv_obj_add_event_cb(g_scroll_area, cb_gesture, LV_EVENT_GESTURE, NULL);
     lv_obj_add_event_cb(g_scroll_area, cb_scroll, LV_EVENT_SCROLL, NULL);
     lv_obj_add_event_cb(g_scroll_area, cb_scroll_end, LV_EVENT_SCROLL_END, NULL);
-    lv_obj_add_flag(g_scroll_area, LV_OBJ_FLAG_GESTURE_BUBBLE);
+
+    /* Invisible spacer drives scroll-area content height to the full
+     * document height so the LVGL scroll bar reflects the global
+     * position naturally. */
+    g_spacer = lv_obj_create(g_scroll_area);
+    lv_obj_set_size(g_spacer, 1, 1);
+    lv_obj_set_pos(g_spacer, 0, 0);
+    lv_obj_set_style_bg_opa(g_spacer, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(g_spacer, 0, 0);
+    lv_obj_set_style_pad_all(g_spacer, 0, 0);
+    lv_obj_clear_flag(g_spacer, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(g_spacer, LV_OBJ_FLAG_SCROLLABLE);
 
     g_img = lv_image_create(g_scroll_area);
     g_img_next = lv_image_create(g_scroll_area);
@@ -393,8 +415,8 @@ void ui_main_create(pdf_view_t *view, int disp_w, int disp_h)
     lv_obj_clear_flag(g_img_next, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_flag(g_img_next, LV_OBJ_FLAG_EVENT_BUBBLE);
     lv_obj_add_flag(g_img_next, LV_OBJ_FLAG_GESTURE_BUBBLE);
-    lv_obj_align(g_img, LV_ALIGN_TOP_MID, 0, 0);
-    lv_obj_align_to(g_img_next, g_img, LV_ALIGN_OUT_BOTTOM_MID, 0, 0);
+    lv_obj_set_pos(g_img, 0, 0);
+    lv_obj_set_pos(g_img_next, 0, 0);
 
     /* ---- Bottom nav bar ---- */
     g_navbar = lv_obj_create(g_screen);
@@ -422,6 +444,7 @@ void ui_main_create(pdf_view_t *view, int disp_w, int disp_h)
 
     /* ---- Load screen and render first page ---- */
     lv_screen_load(g_screen);
+    rebuild_page_offsets();
     render_current_page();
 }
 
@@ -431,12 +454,8 @@ void ui_main_goto_page(int page_idx)
     int page_count = pdf_view_page_count(g_view);
     if (page_count <= 0) return;
 
-    if (page_count == 1) {
-        page_idx = 0;
-    } else {
-        if (page_idx < 0) page_idx = 0;
-        if (page_idx >= page_count - 1) page_idx = page_count - 2;
-    }
+    if (page_idx < 0) page_idx = 0;
+    if (page_idx >= page_count) page_idx = page_count - 1;
 
     g_cur_page = page_idx;
     render_current_page();
@@ -450,15 +469,7 @@ bool ui_main_goto_page_number(int page_no_1based)
     if (page_count <= 0) return false;
     if (page_no_1based < 1 || page_no_1based > page_count) return false;
 
-    /* Continuous two-page window model uses top page index as anchor.
-     * For final page request, anchor to the last valid window top (page_count-2)
-     * so the requested last page appears as the second page in view. */
-    int target_idx0 = page_no_1based - 1;
-    if (page_count > 1 && target_idx0 >= page_count - 1) {
-        target_idx0 = page_count - 2;
-    }
-
-    ui_main_goto_page(target_idx0);
+    ui_main_goto_page(page_no_1based - 1);
     return true;
 }
 
@@ -482,6 +493,7 @@ void ui_main_zoom(float delta)
 
     g_zoom = new_zoom;
     pdf_view_cache_clear(g_view);   /* old zoom renders invalid */
+    rebuild_page_offsets();         /* heights changed */
     render_current_page();
 }
 
@@ -653,30 +665,21 @@ static void search_jump_to_cursor(void)
     if (!g_search_hits || g_search_cursor < 0 ||
         g_search_cursor >= g_search_hits->count) return;
     pdf_search_hit_t *h = &g_search_hits->hits[g_search_cursor];
-    /* Jump to the page containing the hit (1-based). */
+    /* Land the page at the top of the viewport. */
     ui_main_goto_page_number(h->page + 1);
 
-    /* Try to scroll the hit into view inside the rendered top image.
-     * Coordinates are PDF points; convert to pixel space using natural
-     * page size + rendered image height. */
+    /* Then refine: scroll the hit roughly into the upper third using
+     * absolute Y = page_top + hit_y_in_page. */
+    if (!g_page_y || !g_view) { search_update_status(NULL); return; }
     float pw = 0, ph = 0;
-    if (g_view && pdf_view_page_size(g_view, h->page, &pw, &ph) && ph > 0) {
-        const lv_image_dsc_t *dsc =
-            pdf_view_render_page(g_view, h->page, g_disp_w, g_disp_h, g_zoom);
-        if (dsc) {
-            int rendered_h = (int)dsc->header.h;
-            int img_y_offset = 0;
-            /* If hit is on the second page of the window, account for top page height. */
-            if (h->page == g_cur_page + 1) {
-                int top_h = page_height_for_zoom(g_cur_page, g_zoom);
-                img_y_offset = top_h;
-            }
-            int hit_y_px = (int)((h->y / ph) * rendered_h) + img_y_offset;
-            int viewport_h = lv_obj_get_content_height(g_scroll_area);
-            int target = hit_y_px - viewport_h / 3;
-            if (target < 0) target = 0;
-            lv_obj_scroll_to_y(g_scroll_area, target, LV_ANIM_ON);
-        }
+    if (pdf_view_page_size(g_view, h->page, &pw, &ph) && ph > 0) {
+        int page_h_px = page_height_for_zoom(h->page, g_zoom);
+        int hit_y_in_page = (int)((h->y / ph) * page_h_px);
+        int abs_y = g_page_y[h->page] + hit_y_in_page;
+        int viewport_h = lv_obj_get_content_height(g_scroll_area);
+        int target = abs_y - viewport_h / 3;
+        if (target < 0) target = 0;
+        lv_obj_scroll_to_y(g_scroll_area, target, LV_ANIM_ON);
     }
     search_update_status(NULL);
 }
