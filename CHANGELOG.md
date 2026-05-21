@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- UI/scroll behavior switched to **continuous document flow** (Word-like):
+  - Render a two-page window (`N` and `N+1`) in one scroll container.
+  - During vertical scroll, once page `N` is fully scrolled out, window reflows to (`N+1`, `N+2`) while preserving residual offset.
+  - Eliminates gesture-like hard page flips and produces natural page-to-page continuity.
+- Keep gesture-based page flipping disabled in this mode to avoid duplicate triggers and skip-page artifacts.
+- Keep scroll elastic/momentum disabled for deterministic reading flow and consistent edge behavior.
+
+### Fixed
+- Zoomed view panning conflict: when zoomed in, horizontal drag remains content pan (not page turn).
+- Multi-page (177-page) local test path validated with continuous scrolling semantics.
+
 ## [0.1.2] - 2026-05-21
 
 ### Fixed

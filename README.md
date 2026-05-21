@@ -14,7 +14,8 @@ Render pipeline: `MuPDF → ARGB8888 pixmap → lv_image_dsc_t → LVGL SW rende
 
 - [x] Open and display local PDF files  
 - [x] Fit-to-width page rendering  
-- [x] Page navigation (buttons + left/right swipe gesture)  
+- [x] Continuous document scrolling (Word-like page-to-page continuity)  
+- [x] Button navigation (Prev/Next)  
 - [x] Zoom in/out (25% steps, 50%–400%)  
 - [x] LRU page cache (5 pages in RAM, ~40 MB peak for 1080p)  
 - [x] Automatic prefetch of adjacent pages  
