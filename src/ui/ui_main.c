@@ -166,12 +166,49 @@ static void cb_scroll_end(lv_event_t *e)
     (void)e;
 }
 
-/* Swipe gesture on the scroll area for page navigation */
 static void cb_gesture(lv_event_t *e)
 {
-    /* Disable gesture-based flip at zoom<=1.0 to avoid duplicate triggers with
-     * scroll-boundary flipping and to keep page transition deterministic. */
+    if (g_zoom > 1.0f) return;
+    if (g_window_reflow_guard) return;
     (void)e;
+
+    lv_indev_t *indev = lv_indev_active();
+    if (!indev) return;
+    lv_dir_t dir = lv_indev_get_gesture_dir(indev);
+
+    int page_count = pdf_view_page_count(g_view);
+    if (page_count < 2) return;
+    int32_t y = lv_obj_get_scroll_y(g_scroll_area);
+
+    /* Finger swipes DOWN (content moves down) at top of window = go back
+     * to previous window (N-1, N). Scroll-elastic is disabled so y can
+     * never be negative; we use gesture as the only "go back" trigger. */
+    if (dir == LV_DIR_BOTTOM && y <= 0 && g_cur_page > 0) {
+        g_window_reflow_guard = true;
+        g_cur_page--;
+        render_two_page_window(g_cur_page);
+        /* Land at the bottom of the new top page so the page the user
+         * was on (now the bottom slot) stays visually anchored. */
+        int new_top_h = page_height_for_zoom(g_cur_page, g_zoom);
+        int viewport_h = lv_obj_get_content_height(g_scroll_area);
+        int32_t target = new_top_h - viewport_h;
+        if (target < 0) target = 0;
+        lv_obj_scroll_to_y(g_scroll_area, target, LV_ANIM_OFF);
+        g_window_reflow_guard = false;
+    }
+    /* Finger swipes UP (content moves up) past bottom of last window =
+     * advance window. Normally cb_scroll handles this via residual scroll,
+     * but on the very last available window it can stick — fall through. */
+    else if (dir == LV_DIR_TOP && g_cur_page < page_count - 2) {
+        int h0 = page_height_for_zoom(g_cur_page, g_zoom);
+        if (y >= h0 - 1) {
+            g_window_reflow_guard = true;
+            g_cur_page++;
+            render_two_page_window(g_cur_page);
+            lv_obj_scroll_to_y(g_scroll_area, 0, LV_ANIM_OFF);
+            g_window_reflow_guard = false;
+        }
+    }
 }
 
 /* -------------------------------------------------------------------------- */
