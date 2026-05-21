@@ -11,10 +11,10 @@
 #include "platform.h"
 #include "lv_conf.h"
 #include "lvgl.h"
-#include "lv_sdl_window.h"   /* LVGL 9 SDL2 driver header */
-#include "lv_sdl_mouse.h"
-#include "lv_sdl_keyboard.h"
-#include "lv_sdl_mousewheel.h"
+#include "src/drivers/sdl/lv_sdl_window.h"   /* LVGL 9 SDL2 driver header */
+#include "src/drivers/sdl/lv_sdl_mouse.h"
+#include "src/drivers/sdl/lv_sdl_keyboard.h"
+#include "src/drivers/sdl/lv_sdl_mousewheel.h"
 
 #include <SDL2/SDL.h>
 #include <stdio.h>
@@ -45,10 +45,7 @@ void platform_init(int width, int height)
     }
 
     /* Set window title */
-    SDL_Window *sdl_win = lv_sdl_window_get_sdl_window(g_disp);
-    if (sdl_win) {
-        SDL_SetWindowTitle(sdl_win, "LVGL PDF Viewer");
-    }
+    lv_sdl_window_set_title(g_disp, "LVGL PDF Viewer");
 
     /* Input devices */
     g_mouse_indev = lv_sdl_mouse_create();

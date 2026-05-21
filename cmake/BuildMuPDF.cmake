@@ -77,8 +77,8 @@ else()
     endif()
 
     # Build directory (out-of-source not natively supported by MuPDF GNU make,
-    # so we build in-source but use a build tag to keep flavours separate)
-    set(MUPDF_BUILD_TAG "release-${CMAKE_SYSTEM_PROCESSOR}")
+    # so we build in-source; MuPDF only accepts fixed build names: release/debug/etc.)
+    set(MUPDF_BUILD_TAG "release")
 
     include(ExternalProject)
     ExternalProject_Add(mupdf_build
@@ -94,6 +94,7 @@ else()
                 HAVE_GLUT=no
                 HAVE_CURL=no
                 HAVE_GPERF=no
+                HAVE_OBJCOPY=no
                 libs
         INSTALL_COMMAND ""
         BUILD_IN_SOURCE 1

@@ -36,9 +36,9 @@ if(NOT EXISTS "${LVGL_DIR}/CMakeLists.txt")
         "Run:  git submodule update --init --recursive")
 endif()
 
-# Point LVGL at our lv_conf.h
-set(LV_CONF_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/lv_conf.h"
-    CACHE STRING "Path to lv_conf.h" FORCE)
+# Point LVGL at our lv_conf.h  (LVGL 9.x uses LV_BUILD_CONF_PATH)
+set(LV_BUILD_CONF_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/lv_conf.h"
+    CACHE PATH "Path to lv_conf.h" FORCE)
 
 add_subdirectory("${LVGL_DIR}" lvgl EXCLUDE_FROM_ALL)
 
@@ -128,7 +128,7 @@ else()
         lvgl
         ${MUPDF_LIBRARIES}
         ${SDL2_LIBRARIES}
-        m pthread
+        m pthread log
     )
 endif()
 

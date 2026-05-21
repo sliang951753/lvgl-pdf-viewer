@@ -12,7 +12,9 @@
 #ifndef LV_CONF_H
 #define LV_CONF_H
 
+#if !defined(__ASSEMBLY__) && !defined(__ASSEMBLER__)
 #include <stdint.h>
+#endif
 
 /*====================
  * Color settings
