@@ -163,6 +163,21 @@ if(PLATFORM_LINUX)
         ${MUPDF_LIBRARIES}
         m pthread log
     )
+
+    add_executable(test_pageapi_cli
+        tests/test_pageapi_cli.c
+        src/pdf/pdf_view.c
+    )
+    target_include_directories(test_pageapi_cli PRIVATE
+        src
+        src/pdf
+        "${MUPDF_INCLUDE_DIR}"
+    )
+    target_link_libraries(test_pageapi_cli PRIVATE
+        lvgl
+        ${MUPDF_LIBRARIES}
+        m pthread log
+    )
 endif()
 
 # ----------------------------------------------------------------------
